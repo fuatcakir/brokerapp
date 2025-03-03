@@ -1,11 +1,16 @@
 package com.example.brokerapp.service;
 
 import com.example.brokerapp.model.Asset;
+import com.example.brokerapp.model.Customer;
 import com.example.brokerapp.model.Order;
 import com.example.brokerapp.model.OrderSummaryDTO;
 import com.example.brokerapp.repository.AssetRepository;
+import com.example.brokerapp.repository.CustomerRepository;
 import com.example.brokerapp.repository.OrderRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -21,8 +26,18 @@ public class OrderService {
     @Autowired
     AssetRepository assetRepository;
 
+    @Autowired
+    CustomerRepository customerRepository;
+
     public Order createOrder(Order order) throws Exception {
         order.setStatus("PENDING");
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        String currentPrincipalName = authentication.getName();
+        Customer byUsername = customerRepository.findByUsername(currentPrincipalName);
+
+        if (order.getCustomerId() == null) {
+            order.setCustomerId(String.valueOf(byUsername.getId()));
+        }
         if ("SELL".equals(order.getOrderSide())) {
             List<Asset> byCustomerIdAndAssetName = assetRepository.findByCustomerIdAndAssetName(order.getCustomerId(), order.getAssetName());
             if (!byCustomerIdAndAssetName.isEmpty()) {
@@ -82,50 +97,32 @@ public class OrderService {
     }
 
     public void cancelOrder(Long orderId) throws Exception {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        String currentPrincipalName = authentication.getName();
+        Customer byUsername = customerRepository.findByUsername(currentPrincipalName);
+
+
         Order order = orderRepository.findByIdAndStatus(orderId, "PENDING");
-        if (order != null) {
 
-            if ("SELL".equals(order.getOrderSide())) {
-                List<Asset> byCustomerIdAndAssetName = assetRepository.findByCustomerIdAndAssetName(order.getCustomerId(), order.getAssetName());
-                if (!byCustomerIdAndAssetName.isEmpty()) {
-                    if (byCustomerIdAndAssetName.get(0).getUsableSize() >= order.getSize()) { // 999 is admin
-                        Asset asset = byCustomerIdAndAssetName.get(0);
-                        asset.setUsableSize(asset.getUsableSize() + order.getSize());
-                        assetRepository.save(asset);
-                    } else {
-                        throw new Exception("Not Enough Size");
-                    }
-                }
-            }
-
-            order.setStatus("CANCELED");
-            orderRepository.save(order);
-        }
-    }
-
-    public boolean matchOrderPosibility(Order order) {
-        try {
-            List<OrderSummaryDTO> pendingOrdersGroupByAssetAndPrice = orderRepository.getPendingOrderSummary();
-            if (!pendingOrdersGroupByAssetAndPrice.isEmpty()) {
-                for (OrderSummaryDTO summaryDTO : pendingOrdersGroupByAssetAndPrice) {
-                    if (summaryDTO.getAssetName().equals(order.getAssetName())) {
-                        if ("BUY".equals(order.getOrderSide()) && "SELL".equals(summaryDTO.getOrderSide()) && summaryDTO.getPrice().compareTo(BigDecimal.valueOf(order.getPrice())) == 0) {
-                            if (summaryDTO.getTotalAmount().compareTo(BigDecimal.valueOf(order.getPrice() * order.getSize())) >= 0)
-                                return true;
-                        }
-                        if ("SELL".equals(order.getOrderSide()) && "BUY".equals(summaryDTO.getOrderSide()) && summaryDTO.getPrice().compareTo(BigDecimal.valueOf(order.getPrice())) == 0) {
-                            if ((BigDecimal.valueOf(order.getPrice() * order.getSize())).compareTo(summaryDTO.getTotalAmount()) >= 0)
-                                return true;
-                        }
-                    }
-                }
-            }
-
-        } catch (Exception e) {
-            throw new RuntimeException(e);
+        if (!order.getCustomerId().equals(String.valueOf(byUsername.getId()))) {
+            throw new Exception("You cannot cancel someone else's order.");
         }
 
-        return false;
+        if ("SELL".equals(order.getOrderSide())) {
+            List<Asset> byCustomerIdAndAssetName = assetRepository.findByCustomerIdAndAssetName(order.getCustomerId(), order.getAssetName());
+            if (!byCustomerIdAndAssetName.isEmpty()) {
+                if (byCustomerIdAndAssetName.get(0).getUsableSize() >= order.getSize()) { // 999 is admin
+                    Asset asset = byCustomerIdAndAssetName.get(0);
+                    asset.setUsableSize(asset.getUsableSize() + order.getSize());
+                    assetRepository.save(asset);
+                } else {
+                    throw new Exception("Not Enough Size");
+                }
+            }
+        }
+
+        order.setStatus("CANCELED");
+        orderRepository.save(order);
     }
 
     public void matcher() {

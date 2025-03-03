@@ -12,7 +12,6 @@ import lombok.*;
 @Table(name = "Customers")
 public class Customer {
     @Id
-    @GeneratedValue(strategy = GenerationType.AUTO)
     private Long id;
     private String username;
     private String password;
